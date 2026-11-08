@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { captureFragmentEdit, applyFragmentEdit } from '../src/diff/fragmentEdit.js';
+import { captureFragmentEdit, applyFragmentEdit, captureSnippetRestore, applySnippetRestore } from '../src/diff/fragmentEdit.js';
 import { writeMessageDiffAiStage, getMessageDiffMeta, restoreMessageDiffResult, setMessageDiffReverted } from '../src/diff/messageMeta.js';
 function fixture(){
  const msg={mes:'好。好。',swipe_id:0,swipes:['好。好。','其他']},chat=[msg];
@@ -66,4 +66,50 @@ test('whole-message undo blocks a pending fragment save and preserves retained r
  assert.equal(getMessageDiffMeta(f.msg).programMes,'好。好。');
  f.msg.mes='撤回后手动编辑';assert.equal(restoreMessageDiffResult(f.msg),false);
  assert.equal(f.msg.mes,'撤回后手动编辑');
+});
+
+test('restore one card while keeping a separate change and a different Swipe', () => {
+  const original = '甲。乙。丙。', cleaned = '新。乙。改。';
+  const msg = { mes: cleaned, swipe_id: 0, swipes: [cleaned, '另一个 Swipe'], extra: {} };
+  const chat = [msg];
+  writeMessageDiffAiStage(msg, 'swipe:0', original, null, cleaned);
+  const draft = captureSnippetRestore(chat, msg, 'program', [{
+    oldStart: 0, oldEnd: 1, newStart: 0, newEnd: 1,
+    deletedText: '甲', insertedText: '新',
+  }]);
+  assert.ok(draft);
+  assert.equal(applySnippetRestore(chat, draft), true);
+  assert.equal(msg.mes, '甲。乙。改。');
+  assert.deepEqual(msg.swipes, ['甲。乙。改。', '另一个 Swipe']);
+  assert.equal(getMessageDiffMeta(msg).originalMes, original);
+  assert.equal(applySnippetRestore(chat, draft), false);
+});
+
+test('restore multiple changes in one card atomically and reject stale or overlapping ranges', () => {
+  const original = '甲红蓝。', cleaned = '新红改。';
+  const msg = { mes: cleaned, swipe_id: 0, swipes: [cleaned], extra: {} };
+  const chat = [msg];
+  writeMessageDiffAiStage(msg, 'swipe:0', original, null, cleaned);
+  const changes = [
+    { oldStart: 0, oldEnd: 1, newStart: 0, newEnd: 1, deletedText: '甲', insertedText: '新' },
+    { oldStart: 2, oldEnd: 3, newStart: 2, newEnd: 3, deletedText: '蓝', insertedText: '改' },
+  ];
+  const draft = captureSnippetRestore(chat, msg, 'program', changes);
+  assert.ok(draft);
+  assert.equal(applySnippetRestore(chat, draft), true);
+  assert.equal(msg.mes, original);
+  assert.equal(getMessageDiffMeta(msg).programMes, original);
+
+  msg.mes = cleaned; msg.swipes[0] = cleaned;
+  writeMessageDiffAiStage(msg, 'swipe:0', original, null, cleaned);
+  const stale = captureSnippetRestore(chat, msg, 'program', changes);
+  msg.mes = '被其他插件编辑';
+  assert.equal(applySnippetRestore(chat, stale), false);
+  assert.equal(msg.mes, '被其他插件编辑');
+
+  msg.mes = cleaned;
+  const overlapping = captureSnippetRestore(chat, msg, 'program', [changes[0], changes[0]]);
+  assert.ok(overlapping);
+  assert.equal(applySnippetRestore(chat, overlapping), false);
+  assert.equal(msg.mes, cleaned);
 });
