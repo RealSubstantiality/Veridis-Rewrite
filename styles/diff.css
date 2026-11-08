@@ -350,6 +350,44 @@
     border-left: 3px solid var(--border-color) !important;
 }
 
+.blai-diff-snippet-text {
+    display: block !important;
+    white-space: pre-wrap !important;
+}
+
+.blai-diff-snippet-actions {
+    display: flex !important;
+    justify-content: flex-end !important;
+    margin-top: 7px !important;
+    white-space: normal !important;
+    line-height: 1.3 !important;
+}
+
+#blai-diff-modal .blai-diff-snippet-restore {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    padding: 4px 9px !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    font-size: calc(12px * var(--blai-ui-font-scale, 1)) !important;
+    cursor: pointer !important;
+}
+
+#blai-diff-modal .blai-diff-snippet-restore:hover,
+#blai-diff-modal .blai-diff-snippet-restore:focus-visible {
+    color: var(--text-main) !important;
+    border-color: var(--accent-color) !important;
+}
+
+.blai-diff-snippet-restore-error {
+    margin-top: 7px !important;
+    color: var(--status-danger) !important;
+    font-size: calc(12px * var(--blai-ui-font-scale, 1)) !important;
+}
+
 .blai-diff-snippet del {
     color: var(--blai-diff-stage-color, var(--status-danger));
     background: transparent;
