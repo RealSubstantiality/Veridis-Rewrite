@@ -312,7 +312,11 @@ export function renderDiffDocument(pairs, mode) {
                 runIndex++;
             }
             if (parts.some(part => part.type !== 'equal' || part.unchangedReason)) {
-                blocks.push(`<div class="blai-diff-snippet">${renderDiffOperations(parts)}</div>`);
+                const hasChanges = parts.some(part => part.type === 'delete' || part.type === 'insert');
+                const restoreAction = pair.allowSnippetRestore === true && hasChanges
+                    ? '<div class="blai-diff-snippet-actions"><button type="button" class="blai-diff-snippet-restore" title="只撤回本条净化修改，不影响其他内容"><i class="fas fa-rotate-left" aria-hidden="true"></i>撤回本条</button></div>'
+                    : '';
+                blocks.push(`<div class="blai-diff-snippet" data-blai-diff-section="${pair.section}"><div class="blai-diff-snippet-text">${renderDiffOperations(parts)}</div>${restoreAction}</div>`);
             }
         }
     }
