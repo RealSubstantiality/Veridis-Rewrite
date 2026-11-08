@@ -1,4 +1,4 @@
-import { captureFragmentEdit, applyFragmentEdit } from './fragmentEdit.js';
+import { captureFragmentEdit, applyFragmentEdit, captureSnippetRestore, applySnippetRestore } from './fragmentEdit.js';
 /**
  * Owns on-demand Difference modal rendering, actions, and existing DOM bindings.
  */
@@ -157,6 +157,26 @@ export function bindDiffEvents() {
             oldContext: getContextWindow(pair.oldText || '', oldStart, oldEnd),
             newContext: getContextWindow(pair.newText || '', newStart, newEnd),
         };
+    };
+
+    // Convert the changed text of one displayed card into exact, anchored edits.
+    // Adjacent deletion/insertion elements constitute a single replacement.
+    const getSnippetChanges = (snippet) => {
+        const nodes = Array.from(snippet?.querySelectorAll('.blai-diff-change') || []);
+        const changes = [];
+        for (const element of nodes) {
+            const previous = element.previousSibling;
+            const next = element.nextSibling;
+            const sameSection = (a, b) => a?.getAttribute('data-blai-diff-section') === b?.getAttribute('data-blai-diff-section');
+            if (element.tagName === 'INS' && previous?.nodeType === Node.ELEMENT_NODE
+                && previous.matches('del.blai-diff-change') && sameSection(previous, element)) continue;
+            const anchor = element.tagName === 'DEL' && next?.nodeType === Node.ELEMENT_NODE
+                && next.matches('ins.blai-diff-change') && sameSection(element, next) ? next : element;
+            const change = buildDiffChangeFromElement(anchor);
+            if (!change) return null;
+            changes.push(change);
+        }
+        return changes;
     };
 
     const summarizeCandidateTargets = (candidate) => {
@@ -362,7 +382,9 @@ export function bindDiffEvents() {
             const pair = getDiffComparisonForMessage(index, section);
             if (!pair) return [];
             const aiSettings = extension_settings[extensionName].aiRewrite;
-            return [{ ...pair, section, ...(mode === 'full' ? {} : {
+            return [{ ...pair, section,
+                allowSnippetRestore: msg.mes === meta.programMes && (section === 'program' || pair.newText === meta.programMes),
+                ...(mode === 'full' ? {} : {
                 oldRanges: collectAiXmlScopeSegments(pair.oldText, aiSettings, { includeEmpty: true }),
                 newRanges: collectAiXmlScopeSegments(pair.newText, aiSettings, { includeEmpty: true }),
             }) }];
@@ -499,6 +521,28 @@ export function bindDiffEvents() {
         $('#blai-diff-modal-content .blai-diff-change').removeClass('blai-diff-change-selected');
         $(this).addClass('blai-diff-change-selected');
         showRelatedRulesForDiffElement(this);
+    });
+
+    $(document).off('click', '#blai-diff-modal-content .blai-diff-snippet-restore').on('click', '#blai-diff-modal-content .blai-diff-snippet-restore', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const snippet = this.closest('.blai-diff-snippet');
+        const section = snippet?.getAttribute('data-blai-diff-section');
+        const index = getCurrentDiffIndex();
+        const msg = getDiffMessageByIndex(index);
+        const { chat } = getAppContext();
+        const fresh = renderedSnapshot?.msg === msg && renderedSnapshot.branchKey === getMessageDiffBranchKey(msg)
+            && renderedSnapshot.text === msg?.mes && renderedSnapshot.meta === JSON.stringify(getMessageDiffMeta(msg));
+        const changes = fresh ? getSnippetChanges(snippet) : null;
+        const draft = changes && captureSnippetRestore(chat, msg, section, changes);
+        if (!draft || !applySnippetRestore(chat, draft)) {
+            snippet?.querySelector('.blai-diff-snippet-restore-error')?.remove();
+            snippet?.insertAdjacentHTML('beforeend', '<div class="blai-diff-snippet-restore-error" role="status">无法安全撤回此条：记录或正文可能已变化。可刷新透视，或点击具体修改文字单独处理。</div>');
+            return;
+        }
+        markHostChatDirtyFromIndex(draft.index);
+        closeDiffRelatedModal();
+        refreshMessageAfterRevertToggle(draft.index, draft.msg);
     });
 
     $(document).off('click', '#blai-fragment-save, #blai-fragment-restore').on('click', '#blai-fragment-save, #blai-fragment-restore', function(e) {

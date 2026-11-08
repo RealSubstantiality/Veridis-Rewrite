@@ -16,16 +16,58 @@ export function captureFragmentEdit(chat, msg, section, change) {
     return { chat, msg, index: chat.indexOf(msg), branch: getMessageDiffBranchKey(msg), meta, section, newStart, newEnd, deletedText, insertedText, text: msg.mes };
 }
 
-export function applyFragmentEdit(chat, draft, value) {
-    if (!draft || typeof value !== 'string' || chat !== draft.chat || chat[draft.index] !== draft.msg) return false;
+// Validate all edits against the same message, Swipe and Difference snapshot.
+// Compose from the right so previously recorded offsets do not shift.
+function applyFragmentReplacements(chat, draft, replacements) {
+    if (!draft || chat !== draft.chat || chat[draft.index] !== draft.msg
+        || !Array.isArray(replacements) || replacements.length === 0) return false;
     const { msg, meta, branch } = draft;
     if (getMessageDiffBranchKey(msg) !== branch || msg.mes !== draft.text || isMessageDiffReverted(msg)
         || JSON.stringify(getMessageDiffMeta(msg)) !== JSON.stringify(meta)) return false;
-    const next = draft.text.slice(0, draft.newStart) + value + draft.text.slice(draft.newEnd);
+
+    const ordered = [...replacements].sort((a, b) => b.start - a.start || b.end - a.end);
+    let next = draft.text;
+    let rightBoundary = draft.text.length + 1;
+    for (const { start, end, before, after } of ordered) {
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start
+            || end > draft.text.length || end > rightBoundary || start === rightBoundary
+            || typeof before !== 'string' || typeof after !== 'string'
+            || draft.text.slice(start, end) !== before) return false;
+        next = next.slice(0, start) + after + next.slice(end);
+        rightBoundary = start;
+    }
+
     if (!commitCurrentMessageText(msg, next, branch).ok) return false;
-    // Keep original and AI provenance; user edits become the final stage.
+    // Retain the original/AI stages; the selectively restored text becomes the final stage.
     writeMessageDiffAiStage(msg, branch, meta.originalMes, meta.aiMes, next, meta.aiUnchanged);
     clearMessageDisplayText(msg);
     syncCurrentSwipeExtra(msg);
     return true;
+}
+
+export function applyFragmentEdit(chat, draft, value) {
+    if (!draft || typeof value !== 'string') return false;
+    return applyFragmentReplacements(chat, draft, [{
+        start: draft.newStart, end: draft.newEnd,
+        before: draft.insertedText, after: value,
+    }]);
+}
+
+// A snippet may contain more than one edit. Restore them as one atomic commit
+// instead of letting the first edit invalidate subsequent offsets.
+export function captureSnippetRestore(chat, msg, section, changes) {
+    if (!Array.isArray(changes) || changes.length === 0) return null;
+    const drafts = changes.map(change => captureFragmentEdit(chat, msg, section, change));
+    if (drafts.some(draft => !draft)) return null;
+    return {
+        ...drafts[0],
+        replacements: drafts.map(draft => ({
+            start: draft.newStart, end: draft.newEnd,
+            before: draft.insertedText, after: draft.deletedText,
+        })),
+    };
+}
+
+export function applySnippetRestore(chat, draft) {
+    return applyFragmentReplacements(chat, draft, draft?.replacements);
 }

@@ -84,6 +84,24 @@ page.on('pageerror', error => { errors.push(error.message); console.log('BROWSER
 const check = (name, data = {}) => { results.push({ name, passed: true, ...data }); console.log('PASS ' + name); };
 
 try {
+ // A separate browser context isolates this direct-undo check from the existing edit tests.
+ const cardPage = await browser.newPage();
+ await cardPage.goto('http://127.0.0.1:'+server.address().port);
+ await cardPage.waitForFunction(()=>window.fixture?.ready);
+ await cardPage.locator('#test-open').click();
+ await cardPage.locator('#blai-diff-mode-toggle').click();
+ await cardPage.locator('#blai-diff-modal-content .blai-diff-snippet-restore').last().click();
+ const cardRestoredText = await cardPage.evaluate(()=>fixture.chat[0].mes);
+ assert.equal((cardRestoredText.match(/旧/gu)||[]).length,1);
+ assert.equal((cardRestoredText.match(/好/gu)||[]).length,1);
+ assert.equal(await cardPage.evaluate(()=>fixture.chat[0].swipes[1]),'其他');
+ await cardPage.waitForFunction(()=>JSON.parse(localStorage.getItem('testChat')||'[]')[0]?.mes===fixture.chat[0].mes);
+ await cardPage.reload();
+ await cardPage.waitForFunction(()=>window.fixture?.ready);
+ assert.equal(await cardPage.evaluate(()=>fixture.chat[0].mes),cardRestoredText);
+ await cardPage.close();
+ check('one-card undo keeps other changes and Swipe after save/reload');
+
  await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForFunction(()=>window.fixture?.ready);
  await page.locator('#test-open').click();
  await page.locator('#blai-diff-modal-content ins').last().click();
